@@ -1,0 +1,342 @@
+# -*- coding: utf-8 -*-
+# this file is released under public domain and you can use without limitations
+
+#########################################################################
+## This is a samples controller
+## - index is the default action of any application
+## - user is required for authentication and authorization
+## - download is for downloading files uploaded in the db (does streaming)
+## - call exposes all registered services (none by default)
+#########################################################################
+
+import datetime
+import re
+import yaml
+import urllib
+import urllib2
+
+## Wikipedia Extraction Functions
+class Wiki2Plain:
+    def __init__(self, wiki):
+        self.wiki = wiki
+        
+        self.text = wiki
+        self.text = self.unhtml(self.text)
+        self.text = self.unwiki(self.text)
+        self.text = self.punctuate(self.text)
+    
+    def __str__(self):
+        return self.text
+    
+    def unwiki(self, wiki):
+        """
+        Remove wiki markup from the text.
+        """
+        wiki = re.sub(r'(?i)\{\{IPA(\-[^\|\{\}]+)*?\|([^\|\{\}]+)(\|[^\{\}]+)*?\}\}', lambda m: m.group(2), wiki)
+        wiki = re.sub(r'(?i)\{\{Lang(\-[^\|\{\}]+)*?\|([^\|\{\}]+)(\|[^\{\}]+)*?\}\}', lambda m: m.group(2), wiki)
+        wiki = re.sub(r'\{\{[^\{\}]+\}\}', '', wiki)
+        wiki = re.sub(r'(?m)\{\{[^\{\}]+\}\}', '', wiki)
+        wiki = re.sub(r'(?m)\{\|[^\{\}]*?\|\}', '', wiki)
+        wiki = re.sub(r'(?i)\[\[Category:[^\[\]]*?\]\]', '', wiki)
+        wiki = re.sub(r'(?i)\[\[Image:[^\[\]]*?\]\]', '', wiki)
+        wiki = re.sub(r'(?i)\[\[File:[^\[\]]*?\]\]', '', wiki)
+        wiki = re.sub(r'\[\[[^\[\]]*?\|([^\[\]]*?)\]\]', lambda m: m.group(1), wiki)
+        wiki = re.sub(r'\[\[([^\[\]]+?)\]\]', lambda m: m.group(1), wiki)
+        wiki = re.sub(r'\[\[([^\[\]]+?)\]\]', '', wiki)
+        wiki = re.sub(r'(?i)File:[^\[\]]*?', '', wiki)
+        wiki = re.sub(r'\[[^\[\]]*? ([^\[\]]*?)\]', lambda m: m.group(1), wiki)
+        wiki = re.sub(r"''+", '', wiki)
+        wiki = re.sub(r'(?m)^\*$', '', wiki)
+        
+        return wiki
+    
+    def unhtml(self, html):
+        """
+        Remove HTML from the text.
+        """
+        html = re.sub(r'(?i)&nbsp;', ' ', html)
+        html = re.sub(r'(?i)<br[ \\]*?>', '\n', html)
+        html = re.sub(r'(?m)<!--.*?--\s*>', '', html)
+        html = re.sub(r'(?i)<ref[^>]*>[^>]*<\/ ?ref>', '', html)
+        html = re.sub(r'(?m)<.*?>', '', html)
+        html = re.sub(r'(?i)&amp;', '&', html)
+        
+        return html
+    
+    def punctuate(self, text):
+        """
+        Convert every text part into well-formed one-space
+        separate paragraph.
+        """
+        text = re.sub(r'\r\n|\n|\r', '\n', text)
+        text = re.sub(r'\n\n+', '\n\n', text)
+        
+        parts = text.split('\n\n')
+        partsParsed = []
+        
+        for part in parts:
+            part = part.strip()
+            
+            if len(part) == 0:
+                continue
+            
+            partsParsed.append(part)
+        
+        return '\n\n'.join(partsParsed)
+    
+    def image(self):
+        """
+        Retrieve the first image in the document.
+        """
+        # match = re.search(r'(?i)\|?\s*(image|img|image_flag)\s*=\s*(<!--.*-->)?\s*([^\\/:*?<>"|%]+\.[^\\/:*?<>"|%]{3,4})', self.wiki)
+        match = re.search(r'(?i)([^\\/:*?<>"|% =]+)\.(gif|jpg|jpeg|png|bmp)', self.wiki)
+        
+        if match:
+            return '%s.%s' % match.groups()
+        
+        return None
+
+class WikipediaError(Exception):
+    pass
+
+class Wikipedia:
+    url_article = 'http://%s.wikipedia.org/w/index.php?action=raw&title=%s'
+    url_image = 'http://%s.wikipedia.org/w/index.php?title=Special:FilePath&file=%s'
+    url_search = 'http://%s.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&sroffset=%d&srlimit=%d&format=yaml'
+    
+    def __init__(self, lang):
+        self.lang = lang
+    
+    def __fetch(self, url):
+        request = urllib2.Request(url)
+        request.add_header('User-Agent', 'Mozilla/5.0')
+        
+        try:
+            result = urllib2.urlopen(request)
+        except urllib2.HTTPError, e:
+            raise WikipediaError(e.code)
+        except urllib2.URLError, e:
+            raise WikipediaError(e.reason)
+        
+        return result
+    
+    def article(self, article):
+        url = self.url_article % (self.lang, urllib.quote_plus(article))
+        content = self.__fetch(url).read()
+        
+        if content.upper().startswith('#REDIRECT'):
+            match = re.match('(?i)#REDIRECT \[\[([^\[\]]+)\]\]', content)
+            
+            if not match == None:
+                return self.article(match.group(1))
+            
+            raise WikipediaError('Can\'t found redirect article.')
+        
+        return content
+    
+    def image(self, image, thumb=None):
+        url = self.url_image % (self.lang, image)
+        result = self.__fetch(url)
+        content = result.read()
+        
+        if thumb:
+            url = result.geturl() + '/' + thumb + 'px-' + image
+            url = url.replace('/commons/', '/commons/thumb/')
+            url = url.replace('/' + self.lang + '/', '/' + self.lang + '/thumb/')
+            
+            return self.__fetch(url).read()
+        
+        return content
+    
+    def search(self, query, page=1, limit=10):
+        offset = (page - 1) * limit
+        url = self.url_search % (self.lang, urllib.quote_plus(query), offset, limit)
+        content = self.__fetch(url).read()
+        
+        parsed = yaml.load(content)
+        search = parsed['query']['search']
+        
+        results = []
+        
+        if search:
+            for article in search:
+                title = article['title'].strip()
+                
+                snippet = article['snippet']
+                snippet = re.sub(r'(?m)<.*?>', '', snippet)
+                snippet = re.sub(r'\s+', ' ', snippet)
+                snippet = snippet.replace(' . ', '. ')
+                snippet = snippet.replace(' , ', ', ')
+                snippet = snippet.strip()
+                
+                wordcount = article['wordcount']
+                
+                results.append({
+                    'title' : title,
+                    'snippet' : snippet,
+                    'wordcount' : wordcount
+                })
+        
+        # yaml.dump(results, default_style='', default_flow_style=False,
+        #     allow_unicode=True)
+        return results
+
+
+def index():
+    """
+    Initializes reponse variables.
+    Show the search bar which enables the user to search for music, artists,
+    albums and records. On clicking the search tab, the user will be redirected
+    to search action.
+    This page also displays featured artists, albums, music.
+    """
+    form = FORM('',
+    			INPUT(_name='search_term', requires = IS_NOT_EMPTY(), _class='input-large search-query', 
+    				_placeholder='Search for music'),
+    			INPUT(_type='submit', _class='btn', _value='Search'), _class='form-search')
+    if form.process().accepted:
+    	redirect(URL('search', vars=dict(search_term=request.vars.search_term)))
+    featured_songs = 'Something will be added here'
+    featured_artists = 'Something will be added here'
+    featured_albums = 'Something will be added here'
+    return dict(form=form, featured_songs=featured_songs, featured_albums=featured_albums, featured_artists=featured_artists)
+
+def search():
+	"""
+	Returns search results of the query obtained in request args. It Returns
+	four seperate variables containing results for artists, music, albums and
+	records.
+	"""
+	if not request.vars.search_term:
+		redirect(URL('index'))
+	term = request.vars.search_term
+	origterm = term
+	term = term.replace(' ','|')
+	#artists = db.executesql('select * from artist_name limit 10;')
+	artists = db.executesql("select distinct(m1.id), m1.art_name, m1.artist_type, m1.country, m1.b_year,m1.b_month,m1.b_date,m1.e_year,m1.e_month,m1.e_day,ts_rank(to_tsvector(m1.art_name),to_tsquery('"+term+"')) rank from art_info m1 where to_tsvector('english',m1.art_name) @@ to_tsquery('"+term+"') order by rank desc;")
+	albums = db.executesql("select distinct(m1.id),m2.name,m1.art_id,m1.art_name,m1.rel_type,m1.count,ts_rank(to_tsvector(m2.name),to_tsquery('"+term+"')) rank from rel_art m1, release_name m2, release_group m3 where m3.name = m2.id and m3.id = m1.id and to_tsvector('english',m2.name) @@ to_tsquery('"+term+"') order by rank desc limit 20;")
+	songs = db.executesql("select m2.id, m1.name, m3.art_id, m3.art_name, m3.rel_id, m3.rel_name from track_name m1, recording m2, rec_rel_art m3 where m1.id = m2.name and m2.id = m3.rec_id and lower(m1.name) LIKE lower('%%"+origterm+"%%') limit 20;")
+	return dict(songs=songs, albums=albums, artists=artists)
+
+def album():
+	"""
+	This action is responsible for obtaining and returning all the information 
+	related to a particular release group item. 
+	"""
+	if not request.vars.id:
+		redirect(URL('index'))
+	id = request.vars.id
+	releasegroupname = db.executesql("select m1.name from release_name as m1, release_group as m2 where m1.id = m2.name and m2.id = "+id+";")
+	releasegroup = db.executesql("select distinct(m2.id),m3.name,m5.name,m7.track_count,m2.date_year,m2.date_month,m2.date_day,m6.name,m2.barcode from release_group m1,release m2,release_name m3,medium m4,medium_format m5, country m6, tracklist m7 where m5.id = m4.format and m4.release = m2.id and m2.name = m3.id and m2.release_group = m1.id and m2.country = m6.id and m4.tracklist = m7.id and m1.id = "+id+";")
+	urls = db.executesql("select m2.url from l_release_group_url m1, url m2 where m1.entity1 = m2.id and m1.entity0 = "+id+";")
+	links = []
+	wiki = ""
+	for url in urls:
+		if "wikipedia" in url[0]:
+			wiki = url[0]
+		else:
+			links.append(url[0])
+
+	return dict(releasegroupname=releasegroupname, releasegroup=releasegroup, links=links, wiki=wiki)
+
+def release():
+	"""
+	This action is reponsible  for displaying the displaying the tracklist
+	of a particular release
+	"""
+	if not request.vars.id:
+		redirect(URL('index'))
+	id = request.vars.id
+	releasename = db.executesql("select m1.name from release_name as m1, release as m2 where m1.id = m2.name and m2.id = "+id+";")
+	tracklist = db.executesql("select m4.id, m5.name, m4.position, m4.length from release m1,medium m2,tracklist m3,track m4,track_name m5 where m5.id = m4.name and m4.tracklist = m3.id and m3.id = m2.tracklist and m2.release = m1.id and m1.id = "+id+" order by m4.position;")
+	urls = db.executesql("select m2.url from l_release_url m1, url m2 where m1.entity1 = m2.id and m1.entity0 = "+id+";")
+	links = []
+	wiki = ""
+	for url in urls:
+		if "wikipedia" in url[0]:
+			wiki = url[0]
+		else:
+			links.append(url[0])
+	tracklist1 = []
+	for row in tracklist:
+		row1 = list(row)
+		d = datetime.datetime.fromtimestamp(int(row1[3])//1000)
+		row1[3] = str(d.hour)+":"+str(d.minute)
+		tracklist1.append(row1)
+	return dict(tracklist=tracklist1, releasename=releasename, wiki=wiki, links=links)
+
+def artist():
+	"""
+	This action is reponsible for displaying all the information related 
+	to an artist
+	"""
+	if not request.vars.id:
+		redirect(URL('index'))
+	id = request.vars.id
+	artistname = db.executesql("select m1.name from artist_name as m1, artist as m2 where m1.id = m2.name and m2.id = "+id+";")
+	urls = db.executesql("select distinct(m2.url) from l_artist_url m1, url m2 where m2.id = m1.entity1 and m1.entity0 = "+id+";")
+	discography = db.executesql("select m4.name,m5.name,m3.id,m6.count from artist_credit_name m1, artist_credit m2,release_group m3,release_name m4, release_group_primary_type m5,rel_group_count m6 where m4.id = m3.name and m3.artist_credit = m2.id and m2.id = m1.artist_credit and m5.id = m3.type and m6.id = m3.id and m1.artist = "+id+";")
+	links = []
+	wiki = ""
+	for url in urls:
+		if "wikipedia" in url[0]:
+			wiki = url[0]
+		else:
+			links.append(url[0])
+	return dict(discography=discography, wiki=wiki, links=links, artistname=artistname)
+
+def user():
+    """
+    exposes:
+    http://..../[app]/default/user/login
+    http://..../[app]/default/user/logout
+    http://..../[app]/default/user/register
+    http://..../[app]/default/user/profile
+    http://..../[app]/default/user/retrieve_password
+    http://..../[app]/default/user/change_password
+    use @auth.requires_login()
+        @auth.requires_membership('group name')
+        @auth.requires_permission('read','table name',record_id)
+    to decorate functions that need access control
+    """
+    if auth.user:
+        playlist = db.executesql("select a.playlist_id as id , b.name as name from l_user_playlist as a, playlist_name as b where a.playlist_id = b.id and a.user_id = '"+str(auth.user.id)+"';")
+    else:
+        playlist = None
+    return dict(form=auth(), playlist=playlist)
+
+
+def download():
+    """
+    allows downloading of uploaded files
+    http://..../[app]/default/download/[filename]
+    """
+    return response.download(request, db)
+
+
+def call():
+    """
+    exposes services. for example:
+    http://..../[app]/default/call/jsonrpc
+    decorate with @services.jsonrpc the functions to expose
+    supports xml, json, xmlrpc, jsonrpc, amfrpc, rss, csv
+    """
+    return service()
+
+
+@auth.requires_signature()
+def data():
+    """
+    http://..../[app]/default/data/tables
+    http://..../[app]/default/data/create/[table]
+    http://..../[app]/default/data/read/[table]/[id]
+    http://..../[app]/default/data/update/[table]/[id]
+    http://..../[app]/default/data/delete/[table]/[id]
+    http://..../[app]/default/data/select/[table]
+    http://..../[app]/default/data/search/[table]
+    but URLs must be signed, i.e. linked with
+      A('table',_href=URL('data/tables',user_signature=True))
+    or with the signed load operator
+      LOAD('default','data.load',args='tables',ajax=True,user_signature=True)
+    """
+    return dict(form=crud())

@@ -1,0 +1,90 @@
+{{extend 'layout.html'}}
+
+<div class="row">
+	<!-- Display the list of playlists here -->
+	<div class="span6">
+		<h3>List of playlist</h3>
+		{{if playlists:}}
+			<table class="table table-bordered">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Description</th>
+						<th>Remove</th>
+					</tr>
+				</thead>
+				<tbody>
+					{{for playlist in playlists:}}
+						<tr>
+							<td>
+								<a href={{=URL('playlisthome',vars=dict(id=playlist.id))}}>{{=playlist.name}}</a>
+							</td>
+							<td>{{=playlist.description}}</td>
+							<td  id={{=playlist.id}}>
+								<i class="icon-remove remove"></i>
+							</td>
+						</tr>
+					{{pass}}
+				</tbody>
+			</table>
+		{{else:}}
+			<p class="muted">No playlists to display</p>
+		{{pass}}
+		<div id="result"></div>
+	</div>
+	<!-- Display the addition form of playlist here -->
+	<div class="span5 offset1">
+		<h3>Add New Playlists</h3>
+		{{=form}}
+	</div>
+</div>
+
+<script type="text/javascript">
+	$(document).ready(
+		function() {
+			$('.icon-remove').hide();
+		}
+	);
+	$(document).ready(
+		function() {
+			$("td").hover(
+				function() {
+					var element = $('.icon-remove', $(this));
+					if (element.length > 0)
+						element.show();
+				},
+				function() {
+					var element = $('.icon-remove', $(this));
+					if (element.length > 0)
+						element.hide()
+				}
+			);
+		}
+	);
+	$(document).ready(
+		function() {
+			$("td").click(
+				function() {
+					var element = $('.icon-remove', $(this));
+					if (element.length) {
+						var playlist_id = $(this).attr('id');
+						var container = $(this).parent();
+						$(this).html("<img src={{=URL('static','images/loading.gif')}} class='loading'>");
+						var request = $.ajax({
+							type: "POST", 
+							url: "deleteplaylist", 
+							data: {id: playlist_id}
+						});
+						request.done(function(msg) {
+							container.slideUp('slow', function() {$(this).remove();});
+						});
+						 
+						request.fail(function(jqXHR, textStatus) {
+							alert( "Request failed: " + textStatus );
+						});
+					}
+				}
+			);
+		}
+	);
+</script>

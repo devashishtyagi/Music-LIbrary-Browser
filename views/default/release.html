@@ -1,0 +1,99 @@
+{{extend "layout.html"}}
+
+<div class="row">
+	<div class="span8">
+		{{if releasename[0][0]:}}
+			<h3>{{=releasename[0][0]}}</h3>
+		{{else:}}
+			<h3>Release Name N/A</h3>
+		{{pass}}
+		<h4>Description</h4>
+		<blockquote>
+			{{if wiki:}}
+				<p>Here data will be displayed from {{=wiki}}</p>
+				<small>From <cite title="Wikipedia"><a href={{=wiki}}>Wikipedia</a></small>
+			{{else:}}
+				<p>This release doesn't have a description</p>
+			{{pass}}
+		</blockquote>
+		<h4>Releases</h4>
+		<table class="table table-striped table-bordered">
+			<thead>
+				<tr>
+					<th>#</th>
+					<th>Name</th>
+					<th>Length</th>
+					{{if playlists:}}
+						<th>Add to Playlist</th>
+					{{pass}}
+				</tr>
+			</thead>
+			<tbody>
+				{{for row in tracklist:}}
+					<tr>
+						<td>{{=row[2]}}</td>
+						<td>{{=row[1]}}</td>
+						<td>{{=row[3]}}</td>
+						{{if playlists:}}
+							<td>
+								<div class="btn-group">
+	  							<a class="btn btn-inverse" href="#"><i class="icon-music icon-white"></i> Playlists</a>
+	  							<a class="btn btn-inverse dropdown-toggle" data-toggle="dropdown"><span class="caret"></span></a>
+	  							<ul class="dropdown-menu">  								
+									{{for playlist in playlists:}}
+							    		<li id="playlistname" playlistid={{=playlist.id}} trackid={{=row[0]}}><a href="#">{{=playlist.name}}</a></li>
+							    	{{pass}}
+	  							</ul>
+								</div>
+							</td>
+						{{pass}}
+					</tr>
+				{{pass}}
+			</tbody>
+		</table>
+	</div>
+	<div class="span3 offset1">
+		<h4>Cover Art</h4>
+			<img src="{{=coverarturl}}" class="img-polaroid">
+		<h4>External Links</h4>
+		<ul class="unstyled">
+			{{for link in links:}}
+				{{=LI(A(link, _href=link))}}
+			{{pass}}
+		</ul>
+	</div>
+</div>
+
+<script type="text/javascript">
+	$(document).ready(
+		function() {
+			console.log("{{=releasename[0][0]}}");
+		}
+	);
+	$(document).ready(
+		function(){
+			$('li').click(
+				function() {
+					if ($(this).is('#playlistname')) {
+						event.preventDefault();
+						var pid = $(this).attr('playlistid');
+						var tid = $(this).attr('trackid');
+						var request = $.ajax({
+							type: "POST", 
+							url: "addtoplaylist", 
+							data: {playlistid: pid, trackid: tid}
+						});
+						request.done(function(msg) {
+							console.log(msg);
+						});
+						 
+						request.fail(function(jqXHR, textStatus) {
+							console.log(textStatus);
+						});
+						console.log($(this).attr('playlistid') + " " + $(this).attr('songid'));
+					}
+				}
+			);
+		}
+	);
+</script>

@@ -1,0 +1,97 @@
+{{extend "layout.html"}}
+<script src="{{=URL('static','lib/jquery.raty.js')}}"></script>
+
+<div class="row">
+	<div class="span9">
+		{{if releasegroupname:}}
+			<h3>{{=releasegroupname[0][0]}}</h3>
+		{{else:}}
+			<h3>Release Group N/A</h3>
+		{{pass}}
+		<h4>Description</h4>
+		<blockquote>
+			{{if wikiurl:}}
+				<p>{{=wiki}}</p>
+				<small>From <cite title="Wikipedia"><a href={{=wikiurl}}>Wikipedia</a></small>
+			{{else:}}
+				<p>This release doesn't have a description</p>
+			{{pass}}
+		</blockquote>
+		<h4> Global Rating </h4>
+		<div id = "globalstar"></div>
+		{{if auth.user:}}
+			<h4> Your Rating </h4>
+			<div id = "localstar" releasegroupid = {{=releasegroupname[0][1]}} userid = {{=auth.user.id}}></div>
+		{{pass}}
+		<h4>Releases</h4>
+		<table class="table table-striped table-bordered">
+			<thead>
+				<tr>
+					<th>Release Name</th>
+					<th>Format</th>
+					<th>Track Count</th>
+					<th>Date</th>
+					<th>Country</th>
+					<th>Barcode</th>
+				</tr>
+			</thead>
+			<tbody>
+				{{for row in releasegroup:}}
+					{{=TR(
+					TD(A(row[1], _href=URL('release', vars=dict(id=row[0])))),
+					TD(row[2]),
+					TD(row[3]),
+					TD(str(row[4] or '')),
+					TD(row[7]),
+					TD(str(row[8]))
+					)}}
+				{{pass}}
+			</tbody>
+		</table>
+	</div>
+	<div class="span3">
+		<h4>Cover Art</h4>
+			<img src="{{=coverarturl}}" class="img-polaroid">
+		<h4>External Links</h4>
+		<ul class="unstyled">
+			{{for link in links:}}
+				{{=LI(A(link, _href=link))}}
+			{{pass}}
+		</ul>
+	</div>
+</div>
+
+<script type="text/javascript">
+		$(document).ready(
+		function() {
+			$.fn.raty.defaults.path = "{{=URL('static','lib/img')}}";
+			$('#globalstar').raty({
+					halfShow: true, 
+					score: {{=avg_rating}}, 
+					readOnly: true
+			});
+			$('#localstar').raty({
+				halfShow: true,
+				score: {{=user_rating}},
+				click: function(score, evt) {
+					// put some code here
+					var release_group_id = $('#localstar').attr('releasegroupid');
+					var user_id = $('#localstar').attr('userid');
+					var request = $.ajax({
+						type: "POST", 
+						url: "modifyreleasegrouprating", 
+						data: {rgid: release_group_id, uid: user_id, score: score}
+					});
+					request.done(function(msg) {
+						console.log(msg);
+					});
+					 
+					request.fail(function(jqXHR, textStatus) {
+						console.log(textStatus);
+					});
+					console.log(release_group_id+" "+score + " "+ user_id);
+				}
+			});
+		}
+	);
+</script>

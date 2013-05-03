@@ -1,0 +1,50 @@
+{{extend "layout.html"}}
+
+<div class="row">
+	<div class="span9">
+		{{if artistname:}}
+			<h3>{{=artistname[0][0]}}</h3>
+		{{else:}}
+			<h3>Artist Name N/A</h3>
+		{{pass}}
+		<h4>Description</h4>
+		<blockquote>
+			{{if wiki:}}
+				<p>Here data will be displayed from {{=wiki}}</p>
+				<small>From <cite title="Wikipedia"><a href={{=wiki}}>Wikipedia</a></small>
+			{{else:}}
+				<p>This release doesn't have a description</p>
+			{{pass}}
+		</blockquote>
+		<h3>
+		<h4>Realses</h4>
+		<table class="table table-striped table-bordered">
+			<thead>
+				<tr>
+					<th>Release Group</th>
+					<th>Type</th>
+					<th># Releases</th>
+				</tr>
+			</thead>
+			<tbody>
+				{{for row in discography:}}
+					{{=TR(
+					TD(A(row[0], _href=URL('album', vars=dict(id=row[2])))),
+					TD(row[1]),
+					TD(row[3])
+					)}}
+				{{pass}}
+			</tbody>
+		</table>
+	</div>
+	<div class="span3">
+		<h4>Cover Art</h4>
+			<p> Here cover art would be displayed </p>
+		<h4>External Links</h4>
+		<ul class="unstyled">
+			{{for link in links:}}
+				{{=LI(A(link, _href=link))}}
+			{{pass}}
+		</ul>
+	</div>
+</div>

@@ -1,0 +1,584 @@
+(dp1
+S'output'
+p2
+S'<class \'psycopg2.ProgrammingError\'> column "count" does not exist\nLINE 1: select rating, count from release_group_rating_local where i...\n                       ^\n'
+p3
+sS'layer'
+p4
+S'/home/www-data/web2py/applications/musicbrainz/controllers/default.py'
+p5
+sS'code'
+p6
+S'# -*- coding: utf-8 -*-\n# this file is released under public domain and you can use without limitations\n\n#########################################################################\n## This is a deafult controller\n## - index is the default action controller. Performs the search functionality\n## - album is used to render the release group page\n## - artist is used to render the artist information page\n## - release is used to render the information about a single release\n## - playlist allows the user to add or delete playlists\n## - user is required for authentication and authorization\n## - download is for downloading files uploaded in the db (does streaming)\n## - call exposes all registered services (none by default)\n#########################################################################\n\nimport datetime\nimport httplib\nimport pprint\nimport json\nimport urllib2, urllib\nfrom gluon.debug import dbg\n\n########### INDEX CONTROLLER ##############\ndef index():\n\t"""\n\tInitializes reponse variables.\n\tShow the search bar which enables the user to search for music, artists,\n\talbums and records. On clicking the search tab, the user will be redirected\n\tto search action.\n\tThis page also displays featured artists, albums, music.\n\t"""\n\tform = FORM(\'\',\n\t\t\t\tINPUT(_name=\'search_term\', requires = IS_NOT_EMPTY(), _class=\'input-large search-query\', \n\t\t\t\t\t_placeholder=\'Search for music\', _autocomplete="off"),\n\t\t\t\tINPUT(_type=\'submit\', _class=\'btn\', _value=\'Search\'), _class=\'form-search\')\n\tif form.process().accepted:\n\t\tredirect(URL(\'search\', vars=dict(search_term=request.vars.search_term)))\n\tfeatured_songs = \'Something will be added here\'\n\tfeatured_artists = \'Something will be added here\'\n\tfeatured_albums = \'Something will be added here\'\n\treturn dict(form=form, featured_songs=featured_songs, featured_albums=featured_albums, featured_artists=featured_artists)\n\n########### SEARCH CONTROLLER ##############\ndef search():\n\t"""\n\tReturns search results of the query obtained in request args. It Returns\n\tfour seperate variables containing results for artists, music, albums and\n\trecords.\n\t"""\n\tif not request.vars.search_term:\n\t\tredirect(URL(\'index\'))\n\tterm = request.vars.search_term\n\torigterm = term\n\tterm = term.replace(\' \',\'|\')\n\tartists = db.executesql("select distinct(m1.id), m1.art_name, m1.artist_type, m1.country, m1.b_year,m1.b_month,m1.b_date,m1.e_year,m1.e_month,m1.e_day,ts_rank(to_tsvector(m1.art_name),to_tsquery(\'"+term+"\')) rank from art_info m1 where to_tsvector(\'english\',m1.art_name) @@ to_tsquery(\'"+term+"\') order by rank desc limit 20;")\n\talbums = db.executesql("select distinct(m1.id),m2.name,m1.art_id,m1.art_name,m1.rel_type,m1.count,ts_rank(to_tsvector(m2.name),to_tsquery(\'"+term+"\')) rank from rel_art m1, release_name m2, release_group m3 where m3.name = m2.id and m3.id = m1.id and to_tsvector(\'english\',m2.name) @@ to_tsquery(\'"+term+"\') order by rank desc limit 20;")\n\tsongs = db.executesql("select m2.id, m1.name, m3.art_id, m3.art_name, m3.rel_id, m3.rel_name from track_name m1, recording m2, rec_rel_art m3 where m1.id = m2.name and m2.id = m3.rec_id and lower(m1.name) LIKE lower(\'%%"+origterm+"%%\') limit 20;")\n\treturn dict(songs=songs, albums=albums, artists=artists)\n\n########### ALBUM CONTROLLER ##############\ndef album():\n\t"""\n\tThis action is responsible for obtaining and returning all the information \n\trelated to a particular release group item. \n\t"""\n\tif not request.vars.id:\n\t\tredirect(URL(\'index\'))\n\tid = request.vars.id\n\treleasegroupname = db.executesql("select m1.name, m2.id from release_name as m1, release_group as m2 where m1.id = m2.name and m2.id = "+id+";")\n\treleasegroup = db.executesql("select distinct(m2.id),m3.name,m5.name,m7.track_count,m2.date_year,m2.date_month,m2.date_day,m6.name,m2.barcode from release_group m1,release m2,release_name m3,medium m4,medium_format m5, country m6, tracklist m7 where m5.id = m4.format and m4.release = m2.id and m2.name = m3.id and m2.release_group = m1.id and m2.country = m6.id and m4.tracklist = m7.id and m1.id = "+id+";")\n\turls = db.executesql("select m2.url from l_release_group_url m1, url m2 where m1.entity1 = m2.id and m1.entity0 = "+id+";")\n\tmbid = db.executesql("select m1.gid from release_group m1 where m1.id = "+id+";")\n\trating = db.executesql("select rating, count from release_group_rating_local where id = "+id+";")\n\tavg_rating = float(rating[0][0])/float(rating[0][1])\n\tif auth.user():\n\t\turating = db.executesql("select rating from release_group_rating_local where id = "+id+" and user_id = "+auth.user.id+";")\n\t\tif urating:\n\t\t\tuser_rating = urating[0][0]\n\t\telse:\n\t\t\tuser_rating = 0\n\telse:\n\t\tuser_rating = 0\n\ttry:\n\t\tproxy = urllib2.ProxyHandler({\'http\': \'http://cs5090240:phone01202767129@10.10.78.62:3128\'})\n\t\tauthentication = urllib2.HTTPBasicAuthHandler()\n\t\topener = urllib2.build_opener(proxy, authentication, urllib2.HTTPHandler)\n\t\turllib2.install_opener(opener)\n\t\tdestination = \'http://www.coverartarchive.org/release-group/\'+mbid[0][0]\n\t\t#dbg.set_trace()\n\t\treq = urllib2.Request(url=destination,data="")\n\t\tf = urllib2.urlopen(req)\n\t\t#dbg.set_trace()\n\t\tdata =json.load(f)\n\t\t#dbg.set_trace()\n\t\tcoverarturl = data[\'images\'][0][\'image\']\n\texcept:\n\t\tcoverarturl = URL(\'static\',\'images/no_image_found.jpg\')\n\tlinks = []\n\twiki = ""\n\tfor url in urls:\n\t\tif "wikipedia" in url[0]:\n\t\t\twiki = url[0]\n\t\telse:\n\t\t\tlinks.append(url[0])\n\n\treturn dict(releasegroupname=releasegroupname, releasegroup=releasegroup, links=links, wiki=wiki, coverarturl=coverarturl, avg_rating=avg_rating, user_rating=user_rating)\n\n########### RELEASE CONTROLLER ##############\ndef release():\n\t"""\n\tThis action is reponsible  for displaying the displaying the tracklist\n\tof a particular release\n\t"""\n\tif not request.vars.id:\n\t\tredirect(URL(\'index\'))\n\tid = request.vars.id\n\treleasename = db.executesql("select m1.name from release_name as m1, release as m2 where m1.id = m2.name and m2.id = "+id+";")\n\ttracklist = db.executesql("select m4.id, m5.name, m4.position, m4.length from release m1,medium m2,tracklist m3,track m4,track_name m5 where m5.id = m4.name and m4.tracklist = m3.id and m3.id = m2.tracklist and m2.release = m1.id and m1.id = "+id+" order by m4.position;")\n\turls = db.executesql("select m2.url from l_release_url m1, url m2 where m1.entity1 = m2.id and m1.entity0 = "+id+";")\n\tmbid = db.executesql("select m1.gid from release m1 where m1.id = "+id+";")\n\ttry:\n\t\tproxy = urllib2.ProxyHandler({\'http\': \'http://cs5090240:phone01202767129@10.10.78.62:3128\'})\n\t\tauthentication = urllib2.HTTPBasicAuthHandler()\n\t\topener = urllib2.build_opener(proxy, authentication, urllib2.HTTPHandler)\n\t\turllib2.install_opener(opener)\n\t\tdestination = \'http://www.coverartarchive.org/release/\'+mbid[0][0]\n\t\t#dbg.set_trace()\n\t\treq = urllib2.Request(url=destination,data="")\n\t\tf = urllib2.urlopen(req)\n\t\t#dbg.set_trace()\n\t\tdata =json.load(f)\n\t\t#dbg.set_trace()\n\t\tcoverarturl = data[\'images\'][0][\'image\']\n\texcept:\n\t\tcoverarturl = URL(\'static\',\'images/no_image_found.jpg\')\n\tlinks = []\n\twiki = ""\n\tfor url in urls:\n\t\tif "wikipedia" in url[0]:\n\t\t\twiki = url[0]\n\t\telse:\n\t\t\tlinks.append(url[0])\n\ttracklist1 = []\n\tfor row in tracklist:\n\t\trow1 = list(row)\n\t\tif (row1[3]):\n\t\t\td = datetime.datetime.fromtimestamp(int(row1[3])//1000)\n\t\t\trow1[3] = str(d.hour)+":"+str(d.minute)\n\t\telse:\n\t\t\trow1[3] = \'N/A\'\n\t\ttracklist1.append(row1)\n\tif auth.user:\n\t\tplaylists = db(db.playlists.user_id == auth.user.id).select()\n\telse:\n\t\tplaylists = None\n\treturn dict(tracklist=tracklist1, releasename=releasename, wiki=wiki, links=links, playlists=playlists, coverarturl=coverarturl)\n\n########### ARTIST CONTROLLER ##############\ndef artist():\n\t"""\n\tThis action is reponsible for displaying all the information related \n\tto an artist\n\t"""\n\tif not request.vars.id:\n\t\tredirect(URL(\'index\'))\n\tid = request.vars.id\n\tartistname = db.executesql("select m1.name from artist_name as m1, artist as m2 where m1.id = m2.name and m2.id = "+id+";")\n\turls = db.executesql("select distinct(m2.url) from l_artist_url m1, url m2 where m2.id = m1.entity1 and m1.entity0 = "+id+";")\n\tdiscography = db.executesql("select m4.name,m5.name,m3.id,m6.count from artist_credit_name m1, artist_credit m2,release_group m3,release_name m4, release_group_primary_type m5,rel_group_count m6 where m4.id = m3.name and m3.artist_credit = m2.id and m2.id = m1.artist_credit and m5.id = m3.type and m6.id = m3.id and m1.artist = "+id+";")\n\tlinks = []\n\twiki = ""\n\tfor url in urls:\n\t\tif "wikipedia" in url[0]:\n\t\t\twiki = url[0]\n\t\telse:\n\t\t\tlinks.append(url[0])\n\treturn dict(discography=discography, wiki=wiki, links=links, artistname=artistname)\n\n########### PLAYLIST CONTROLLER ##############\n@auth.requires_login()\ndef playlist():\n\tdb.playlists.user_id.default = auth.user.id\n\tform =  SQLFORM(db.playlists, labels={\'name\':\'Name\', \'description\':\'Description\', \'submit\':\'Add Playlist\'})\n\tif form.process().accepted:\n\t\tresponse.flash = \'Your playlists has been added.\'\n\tplaylists = db(db.playlists.user_id == auth.user.id).select()\n\treturn dict(playlists=playlists, form=form)\n\n########### DELETE PLAYLIST ################\n@auth.requires_login()\ndef deleteplaylist():\n\tif request.vars.id:\n\t\tdb(db.playlists.id == request.vars.id).delete()\n\treturn dict()\n\n########## ADD TO PLAYLIST ################\n@auth.requires_login()\ndef addtoplaylist():\n\tif request.vars:\n\t\tplaylistid = str(request.vars.playlistid)\n\t\ttrackid = str(request.vars.trackid)\n\t\tif not db.executesql("SELECT * FROM playlist_track where playlist_id="+playlistid+" AND track_id="+trackid+";"):\n\t\t\tdb.executesql("INSERT INTO playlist_track VALUES(" + playlistid + "," + trackid + ");")\n\treturn dict()\n\n########## PLAYLIST HOME ################\ndef playlisthome():\n\tif not request.vars.id:\n\t\tredirect(URL(\'index\'))\n\tid = request.vars.id\n\trecordings = db.executesql("select pr.playlist_id, pr.track_id, tn.name from playlist_track as pr, track as tk, track_name as tn where pr.playlist_id = "+id+" AND pr.track_id = tk.id AND tk.name = tn.id;")\n\tplaylist_info = db.executesql("select * from playlists where id = "+id+";")\n\treturn dict(recordings=recordings, playlist_info=playlist_info);\n\n########## DELETE TRACK FROM PLAYLIST ###########\ndef delete_track_from_playlist():\n\tif not (request.vars.pid and request.vars.tid):\n\t\tredirect(URL(\'index\'))\n\tpid = request.vars.pid\n\ttid = request.vars.tid\n\tdb.executesql("DELETE FROM playlist_track WHERE playlist_id="+pid+" AND track_id="+tid+";")\n\treturn dict()\n\n########## MODIFY USER RATINGS ##############\ndef modifyreleasegrouprating():\n\tif not (request.vars.rgid and request.vars.uid and request.vars.score):\n\t\tredirect(URL(\'index\'))\n\trgid = request.vars.rgid\n\tuid = request.vars.uid\n\tscore = request.vars.score\n\tif not db.executesql("select * from release_group_rating_local where id = "+rgid+" and user_id = "+uid+";"):\n\t\tdb.executesql("insert into release_group_rating_local values("+rgid+","+uid+","+score+");")\n\telse:\n\t\tdb.executesql("update release_group_rating_local set rating = "+score+" where id = "+rgid+" and user_id = "+uid+";")\n\treturn dict()\n\ndef user():\n\t"""\n\texposes:\n\thttp://..../[app]/default/user/login\n\thttp://..../[app]/default/user/logout\n\thttp://..../[app]/default/user/register\n\thttp://..../[app]/default/user/profile\n\thttp://..../[app]/default/user/retrieve_password\n\thttp://..../[app]/default/user/change_password\n\tuse @auth.requires_login()\n\t\t@auth.requires_membership(\'group name\')\n\t\t@auth.requires_permission(\'read\',\'table name\',record_id)\n\tto decorate functions that need access control\n\t"""\n\treturn dict(form=auth())\n\n\ndef download():\n\t"""\n\tallows downloading of uploaded files\n\thttp://..../[app]/default/download/[filename]\n\t"""\n\treturn response.download(request, db)\n\n\ndef call():\n\t"""\n\texposes services. for example:\n\thttp://..../[app]/default/call/jsonrpc\n\tdecorate with @services.jsonrpc the functions to expose\n\tsupports xml, json, xmlrpc, jsonrpc, amfrpc, rss, csv\n\t"""\n\treturn service()\n\n\n@auth.requires_signature()\ndef data():\n\t"""\n\thttp://..../[app]/default/data/tables\n\thttp://..../[app]/default/data/create/[table]\n\thttp://..../[app]/default/data/read/[table]/[id]\n\thttp://..../[app]/default/data/update/[table]/[id]\n\thttp://..../[app]/default/data/delete/[table]/[id]\n\thttp://..../[app]/default/data/select/[table]\n\thttp://..../[app]/default/data/search/[table]\n\tbut URLs must be signed, i.e. linked with\n\t  A(\'table\',_href=URL(\'data/tables\',user_signature=True))\n\tor with the signed load operator\n\t  LOAD(\'default\',\'data.load\',args=\'tables\',ajax=True,user_signature=True)\n\t"""\n\treturn dict(form=crud())\n\nresponse._vars=response._caller(album)\n'
+p7
+sS'snapshot'
+p8
+(dp9
+S'exception'
+p10
+(dp11
+S'__module__'
+p12
+S"'psycopg2'"
+p13
+sS'__getslice__'
+p14
+S"<method-wrapper '__getslice__' of ProgrammingError object>"
+p15
+sS'__str__'
+p16
+S"<method-wrapper '__str__' of ProgrammingError object>"
+p17
+sS'__reduce__'
+p18
+S'<built-in method __reduce__ of ProgrammingError object>'
+p19
+sS'__dict__'
+p20
+S'{\'cursor\': <cursor object at 0xab94689c; closed: 0>, \'pgcode\': \'42703\', \'pgerror\': \'ERROR:  column "count" does not exist\\nLINE 1: se...rating_local where i...\\n                       ^\\n\'}'
+p21
+sS'__sizeof__'
+p22
+S'<built-in method __sizeof__ of ProgrammingError object>'
+p23
+sS'__weakref__'
+p24
+S'None'
+p25
+sS'__init__'
+p26
+S"<method-wrapper '__init__' of ProgrammingError object>"
+p27
+sS'__setattr__'
+p28
+S"<method-wrapper '__setattr__' of ProgrammingError object>"
+p29
+sS'__reduce_ex__'
+p30
+S'<built-in method __reduce_ex__ of ProgrammingError object>'
+p31
+sS'__new__'
+p32
+S'<built-in method __new__ of type object>'
+p33
+sS'__format__'
+p34
+S'<built-in method __format__ of ProgrammingError object>'
+p35
+sS'__class__'
+p36
+S"<class 'psycopg2.ProgrammingError'>"
+p37
+sS'pgerror'
+p38
+S'\'ERROR:  column "count" does not exist\\nLINE 1: se...rating_local where i...\\n                       ^\\n\''
+p39
+sS'__doc__'
+p40
+S"'Error related to database programming (SQL error, table not found etc).'"
+p41
+sS'__getitem__'
+p42
+S"<method-wrapper '__getitem__' of ProgrammingError object>"
+p43
+sS'__setstate__'
+p44
+S'<built-in method __setstate__ of ProgrammingError object>'
+p45
+sS'__getattribute__'
+p46
+S"<method-wrapper '__getattribute__' of ProgrammingError object>"
+p47
+sS'args'
+p48
+S'(\'column "count" does not exist\\nLINE 1: select rat...rating_local where i...\\n                       ^\\n\',)'
+p49
+sS'__subclasshook__'
+p50
+S'<built-in method __subclasshook__ of type object>'
+p51
+sS'pgcode'
+p52
+S"'42703'"
+p53
+sS'__unicode__'
+p54
+S'<built-in method __unicode__ of ProgrammingError object>'
+p55
+sS'cursor'
+p56
+S'<cursor object at 0xab94689c; closed: 0>'
+p57
+sS'__delattr__'
+p58
+S"<method-wrapper '__delattr__' of ProgrammingError object>"
+p59
+sS'__repr__'
+p60
+S"<method-wrapper '__repr__' of ProgrammingError object>"
+p61
+sS'__hash__'
+p62
+S"<method-wrapper '__hash__' of ProgrammingError object>"
+p63
+ssS'evalue'
+p64
+S'column "count" does not exist\nLINE 1: select rating, count from release_group_rating_local where i...\n                       ^\n'
+p65
+sS'request'
+p66
+cgluon.html
+XML_unpickle
+p67
+(S's\xb7Y\x00\x00<div><table><tr><td style="font-weight:bold;vertical-align:top">ajax</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">application</td><td valign="top">:</td><td><div>musicbrainz</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">args</td><td valign="top">:</td><td><div><table></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">body</td><td valign="top">:</td><td><div>&lt;cStringIO.StringO object at 0xab2464e0&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">cid</td><td valign="top">:</td><td><div>None</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">client</td><td valign="top">:</td><td><div>127.0.0.1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">controller</td><td valign="top">:</td><td><div>default</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">cookies</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">session_id_admin</td><td valign="top">:</td><td><div>127.0.0.1-55ffdea2-36a6-4dc3-9176-b41244b4df52<table><tr><td style="font-weight:bold;vertical-align:top">comment</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">domain</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">expires</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">httponly</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">max-age</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">path</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">secure</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">version</td><td valign="top">:</td><td><div></div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_id_musicbrainz</td><td valign="top">:</td><td><div>127.0.0.1-cef46f10-7fe3-4161-8f04-f260945a4b1b<table><tr><td style="font-weight:bold;vertical-align:top">comment</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">domain</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">expires</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">httponly</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">max-age</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">path</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">secure</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">version</td><td valign="top">:</td><td><div></div></td></tr></table></div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">env</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">app_folders</td><td valign="top">:</td><td><div>set([&#x27;/home/www-data/web2py/applications/admin/&#x27;, &#x27;/home/www-data/web2py/applications/musicbrainz/&#x27;])</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">applications_parent</td><td valign="top">:</td><td><div>/home/www-data/web2py</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">db_sessions</td><td valign="top">:</td><td><div>set([])</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">debugging</td><td valign="top">:</td><td><div>True</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">document_root</td><td valign="top">:</td><td><div>/etc/apache2/htdocs</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">gateway_interface</td><td valign="top">:</td><td><div>CGI/1.1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">gluon_parent</td><td valign="top">:</td><td><div>/home/www-data/web2py</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_accept</td><td valign="top">:</td><td><div>text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_accept_charset</td><td valign="top">:</td><td><div>ISO-8859-1,utf-8;q=0.7,*;q=0.3</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_accept_encoding</td><td valign="top">:</td><td><div>gzip,deflate,sdch</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_accept_language</td><td valign="top">:</td><td><div>en-US,en;q=0.8</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_cache_control</td><td valign="top">:</td><td><div>max-age=0</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_connection</td><td valign="top">:</td><td><div>keep-alive</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_cookie</td><td valign="top">:</td><td><div>session_id_admin=127.0.0.1-55ffdea2-36a6-4dc3-9176-b41244b4df52; session_id_musicbrainz=127.0.0.1-cef46f10-7fe3-4161-8f04-f260945a4b1b</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_host</td><td valign="top">:</td><td><div>localhost</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_referer</td><td valign="top">:</td><td><div>https://localhost/musicbrainz/default/search?search_term=hybrid+theory</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">http_user_agent</td><td valign="top">:</td><td><div>Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.17 (KHTML, like Gecko) Chrome/24.0.1312.52 Safari/537.17</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">https</td><td valign="top">:</td><td><div>1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">is_jython</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">is_pypy</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">local_hosts</td><td valign="top">:</td><td><div><table><tr><td><div>::ffff:127.0.0.1</div></td></tr><tr><td><div>::1</div></td></tr><tr><td><div>localhost</div></td></tr><tr><td><div>pong</div></td></tr><tr><td><div>127.0.1.1</div></td></tr><tr><td><div>127.0.0.1</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_application_group</td><td valign="top">:</td><td><div>127.0.1.1|</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_callable_object</td><td valign="top">:</td><td><div>application</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_handler_script</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_input_chunked</td><td valign="top">:</td><td><div>0</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_listener_host</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_listener_port</td><td valign="top">:</td><td><div>443</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_process_group</td><td valign="top">:</td><td><div>web2py</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_request_handler</td><td valign="top">:</td><td><div>wsgi-script</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_script_reloading</td><td valign="top">:</td><td><div>1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi_version</td><td valign="top">:</td><td><div><table><tr><td><div>3</div></td></tr><tr><td><div>3</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">path_info</td><td valign="top">:</td><td><div>/musicbrainz/default/album</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">path_translated</td><td valign="top">:</td><td><div>/home/www-data/web2py/wsgihandler.py/musicbrainz/default/album</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">query_string</td><td valign="top">:</td><td><div>id=100229</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">remote_addr</td><td valign="top">:</td><td><div>127.0.0.1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">remote_port</td><td valign="top">:</td><td><div>52879</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">request_method</td><td valign="top">:</td><td><div>GET</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">request_uri</td><td valign="top">:</td><td><div>/musicbrainz/default/album?id=100229</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">script_filename</td><td valign="top">:</td><td><div>/home/www-data/web2py/wsgihandler.py</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">script_name</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">server_addr</td><td valign="top">:</td><td><div>127.0.0.1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">server_admin</td><td valign="top">:</td><td><div>[no address given]</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">server_name</td><td valign="top">:</td><td><div>localhost</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">server_port</td><td valign="top">:</td><td><div>443</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">server_protocol</td><td valign="top">:</td><td><div>HTTP/1.1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">server_signature</td><td valign="top">:</td><td><div>&lt;address&gt;Apache/2.2.22 (Ubuntu) Server at localhost Port 443&lt;/address&gt;\n</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">server_software</td><td valign="top">:</td><td><div>Apache/2.2.22 (Ubuntu)</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">ssl_tls_sni</td><td valign="top">:</td><td><div>localhost</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">web2py_path</td><td valign="top">:</td><td><div>/home/www-data/web2py</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">web2py_version</td><td valign="top">:</td><td><div>2.4.6-stable+timestamp.2013.04.06.17.37.38</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi_errors</td><td valign="top">:</td><td><div>&lt;mod_wsgi.Log object at 0xabf64cf0&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi_file_wrapper</td><td valign="top">:</td><td><div>&lt;built-in method file_wrapper of mod_wsgi.Adapter object at 0xaba43da0&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi_input</td><td valign="top">:</td><td><div>&lt;mod_wsgi.Input object at 0xaa7742f0&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi_multiprocess</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi_multithread</td><td valign="top">:</td><td><div>True</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi_run_once</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi_url_scheme</td><td valign="top">:</td><td><div>https</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi_version</td><td valign="top">:</td><td><div><table><tr><td><div>1</div></td></tr><tr><td><div>1</div></td></tr></table></div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">extension</td><td valign="top">:</td><td><div>html</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">folder</td><td valign="top">:</td><td><div>/home/www-data/web2py/applications/musicbrainz/</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">function</td><td valign="top">:</td><td><div>album</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">get_vars</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">id</td><td valign="top">:</td><td><div>100229</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">global_settings</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">app_folders</td><td valign="top">:</td><td><div>set([&#x27;/home/www-data/web2py/applications/admin/&#x27;, &#x27;/home/www-data/web2py/applications/musicbrainz/&#x27;])</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">applications_parent</td><td valign="top">:</td><td><div>/home/www-data/web2py</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">db_sessions</td><td valign="top">:</td><td><div>set([])</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">debugging</td><td valign="top">:</td><td><div>True</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">gluon_parent</td><td valign="top">:</td><td><div>/home/www-data/web2py</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">is_jython</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">is_pypy</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">local_hosts</td><td valign="top">:</td><td><div><table><tr><td><div>::ffff:127.0.0.1</div></td></tr><tr><td><div>::1</div></td></tr><tr><td><div>localhost</div></td></tr><tr><td><div>pong</div></td></tr><tr><td><div>127.0.1.1</div></td></tr><tr><td><div>127.0.0.1</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">web2py_version</td><td valign="top">:</td><td><div>2.4.6-stable+timestamp.2013.04.06.17.37.38</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">is_https</td><td valign="top">:</td><td><div>True</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">is_local</td><td valign="top">:</td><td><div>True</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">is_restful</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">now</td><td valign="top">:</td><td><div>datetime.datetime(2013, 4, 25, 10, 42, 22, 145971)</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">post_vars</td><td valign="top">:</td><td><div><table></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">raw_args</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">raw_extension</td><td valign="top">:</td><td><div>None</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">url</td><td valign="top">:</td><td><div>/musicbrainz/default/album</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">utcnow</td><td valign="top">:</td><td><div>datetime.datetime(2013, 4, 25, 5, 12, 22, 146009)</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">uuid</td><td valign="top">:</td><td><div>musicbrainz/127.0.0.1.2013-04-25.10-42-22.9f72a7e3-33ac-419a-a304-a7cadcbc9b1a</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">vars</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">id</td><td valign="top">:</td><td><div>100229</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">environ</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">DOCUMENT_ROOT</td><td valign="top">:</td><td><div>/etc/apache2/htdocs</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">GATEWAY_INTERFACE</td><td valign="top">:</td><td><div>CGI/1.1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTPS</td><td valign="top">:</td><td><div>1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_ACCEPT</td><td valign="top">:</td><td><div>text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_ACCEPT_CHARSET</td><td valign="top">:</td><td><div>ISO-8859-1,utf-8;q=0.7,*;q=0.3</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_ACCEPT_ENCODING</td><td valign="top">:</td><td><div>gzip,deflate,sdch</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_ACCEPT_LANGUAGE</td><td valign="top">:</td><td><div>en-US,en;q=0.8</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_CACHE_CONTROL</td><td valign="top">:</td><td><div>max-age=0</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_CONNECTION</td><td valign="top">:</td><td><div>keep-alive</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_COOKIE</td><td valign="top">:</td><td><div>session_id_admin=127.0.0.1-55ffdea2-36a6-4dc3-9176-b41244b4df52; session_id_musicbrainz=127.0.0.1-cef46f10-7fe3-4161-8f04-f260945a4b1b</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_HOST</td><td valign="top">:</td><td><div>localhost</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_REFERER</td><td valign="top">:</td><td><div>https://localhost/musicbrainz/default/search?search_term=hybrid+theory</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">HTTP_USER_AGENT</td><td valign="top">:</td><td><div>Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.17 (KHTML, like Gecko) Chrome/24.0.1312.52 Safari/537.17</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">PATH_INFO</td><td valign="top">:</td><td><div>/musicbrainz/default/album</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">PATH_TRANSLATED</td><td valign="top">:</td><td><div>/home/www-data/web2py/wsgihandler.py/musicbrainz/default/album</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">QUERY_STRING</td><td valign="top">:</td><td><div>id=100229</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">REMOTE_ADDR</td><td valign="top">:</td><td><div>127.0.0.1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">REMOTE_PORT</td><td valign="top">:</td><td><div>52879</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">REQUEST_METHOD</td><td valign="top">:</td><td><div>GET</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">REQUEST_URI</td><td valign="top">:</td><td><div>/musicbrainz/default/album?id=100229</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SCRIPT_FILENAME</td><td valign="top">:</td><td><div>/home/www-data/web2py/wsgihandler.py</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SCRIPT_NAME</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SERVER_ADDR</td><td valign="top">:</td><td><div>127.0.0.1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SERVER_ADMIN</td><td valign="top">:</td><td><div>[no address given]</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SERVER_NAME</td><td valign="top">:</td><td><div>localhost</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SERVER_PORT</td><td valign="top">:</td><td><div>443</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SERVER_PROTOCOL</td><td valign="top">:</td><td><div>HTTP/1.1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SERVER_SIGNATURE</td><td valign="top">:</td><td><div>&lt;address&gt;Apache/2.2.22 (Ubuntu) Server at localhost Port 443&lt;/address&gt;\n</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SERVER_SOFTWARE</td><td valign="top">:</td><td><div>Apache/2.2.22 (Ubuntu)</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">SSL_TLS_SNI</td><td valign="top">:</td><td><div>localhost</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.application_group</td><td valign="top">:</td><td><div>127.0.1.1|</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.callable_object</td><td valign="top">:</td><td><div>application</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.handler_script</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.input_chunked</td><td valign="top">:</td><td><div>0</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.listener_host</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.listener_port</td><td valign="top">:</td><td><div>443</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.process_group</td><td valign="top">:</td><td><div>web2py</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.request_handler</td><td valign="top">:</td><td><div>wsgi-script</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.script_reloading</td><td valign="top">:</td><td><div>1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">mod_wsgi.version</td><td valign="top">:</td><td><div><table><tr><td><div>3</div></td></tr><tr><td><div>3</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi.errors</td><td valign="top">:</td><td><div>&lt;mod_wsgi.Log object at 0xabf64cf0&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi.file_wrapper</td><td valign="top">:</td><td><div>&lt;built-in method file_wrapper of mod_wsgi.Adapter object at 0xaba43da0&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi.input</td><td valign="top">:</td><td><div>&lt;cStringIO.StringO object at 0xab2464e0&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi.multiprocess</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi.multithread</td><td valign="top">:</td><td><div>True</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi.run_once</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi.url_scheme</td><td valign="top">:</td><td><div>https</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">wsgi.version</td><td valign="top">:</td><td><div>1</div></td></tr></table></div></td></tr></table></div></td></tr></table></div>'
+tRp68
+sS'frames'
+p69
+(lp70
+(dp71
+S'file'
+p72
+S'/home/www-data/web2py/gluon/restricted.py'
+p73
+sS'dump'
+p74
+(dp75
+S'environment'
+p76
+S"{'A': <class 'gluon.html.A'>, 'ANY_OF': <class 'gluon.validators.ANY_OF'>, 'Auth': <class 'gluon.tools.Auth'>, 'B': <class 'gluon.html.B'>, 'BEAUTIFY': <class 'gluon.html.BEAUTIFY'>, 'BODY': <class 'gluon.html.BODY'>, 'BR': <class 'gluon.html.BR'>, 'BUTTON': <class 'gluon.html.BUTTON'>, 'CAT': <class 'gluon.html.CAT'>, 'CENTER': <class 'gluon.html.CENTER'>, ...}"
+p77
+sS'ccode'
+p78
+S'<code object <module> at 0xab9a0338, file "/home...ons/musicbrainz/controllers/default.py", line 16>'
+p79
+ssS'lnum'
+p80
+I212
+sS'lines'
+p81
+(dp82
+I207
+S'    try:'
+p83
+sI208
+S'        if isinstance(code, types.CodeType):'
+p84
+sI209
+S'            ccode = code'
+p85
+sI210
+S'        else:'
+p86
+sI211
+S'            ccode = compile2(code, layer)'
+p87
+sI212
+S'        exec ccode in environment'
+p88
+sI213
+S'    except HTTP:'
+p89
+sI214
+S'        raise'
+p90
+sI215
+S'    except RestrictedError:'
+p91
+sI216
+S'        # do not encapsulate (obfuscate) the original RestrictedError'
+p92
+ssS'call'
+p93
+S"(code='# -*- coding: utf-8 -*-\\n# this file is released ...=crud())\\n\\nresponse._vars=response._caller(album)\\n', environment={'A': <class 'gluon.html.A'>, 'ANY_OF': <class 'gluon.validators.ANY_OF'>, 'Auth': <class 'gluon.tools.Auth'>, 'B': <class 'gluon.html.B'>, 'BEAUTIFY': <class 'gluon.html.BEAUTIFY'>, 'BODY': <class 'gluon.html.BODY'>, 'BR': <class 'gluon.html.BR'>, 'BUTTON': <class 'gluon.html.BUTTON'>, 'CAT': <class 'gluon.html.CAT'>, 'CENTER': <class 'gluon.html.CENTER'>, ...}, layer='/home/www-data/web2py/applications/musicbrainz/controllers/default.py')"
+p94
+sS'func'
+p95
+S'restricted'
+p96
+sa(dp97
+g72
+S'/home/www-data/web2py/applications/musicbrainz/controllers/default.py'
+p98
+sg74
+(dp99
+sg80
+I289
+sg81
+(dp100
+I278
+S'\thttp://..../[app]/default/data/update/[table]/[id]'
+p101
+sI279
+S'\thttp://..../[app]/default/data/delete/[table]/[id]'
+p102
+sI280
+S'\thttp://..../[app]/default/data/select/[table]'
+p103
+sI281
+S'\thttp://..../[app]/default/data/search/[table]'
+p104
+sI282
+S'\tbut URLs must be signed, i.e. linked with'
+p105
+sI283
+S"\t  A('table',_href=URL('data/tables',user_signature=True))"
+p106
+sI284
+S'\tor with the signed load operator'
+p107
+sI285
+S"\t  LOAD('default','data.load',args='tables',ajax=True,user_signature=True)"
+p108
+sI286
+S'\t"""'
+p109
+sI287
+S'\treturn dict(form=crud())'
+p110
+ssg93
+S'()'
+p111
+sg95
+S'<module>'
+p112
+sa(dp113
+g72
+S'/home/www-data/web2py/gluon/globals.py'
+p114
+sg74
+(dp115
+S'self'
+p116
+S'undefined'
+p117
+sS'f'
+S'<function album>'
+p118
+ssg80
+I194
+sg81
+(dp119
+I192
+S"        self.delimiters = ('{{', '}}')"
+p120
+sI193
+S'        self._vars = None'
+p121
+sI194
+S'        self._caller = lambda f: f()'
+p122
+sI195
+S'        self._view_environment = None'
+p123
+sI196
+S'        self._custom_commit = None'
+p124
+sI197
+S'        self._custom_rollback = None'
+p125
+sI198
+S''
+sI189
+S'        self.menu = []             # used by the default view layout'
+p126
+sI190
+S'        self.files = []            # used by web2py_ajax.html'
+p127
+sI191
+S'        self.generic_patterns = []  # patterns to allow generic views'
+p128
+ssg93
+S'(f=<function album>)'
+p129
+sg95
+S'<lambda>'
+p130
+sa(dp131
+g72
+S'/home/www-data/web2py/applications/musicbrainz/controllers/default.py'
+p132
+sg74
+(dp133
+S'global db'
+p134
+S'<DAL uri="postgres://musicbrainz:******@localhost/musicbrainz_db">'
+p135
+sS'rating'
+p136
+g117
+sS'db.executesql'
+p137
+S'<bound method DAL.executesql of <DAL uri="postgres://musicbrainz:******@localhost/musicbrainz_db">>'
+p138
+sS'id'
+p139
+S"'100229'"
+p140
+ssg80
+I73
+sg81
+(dp141
+I68
+S'\tid = request.vars.id'
+p142
+sI69
+S'\treleasegroupname = db.executesql("select m1.name, m2.id from release_name as m1, release_group as m2 where m1.id = m2.name and m2.id = "+id+";")'
+p143
+sI70
+S'\treleasegroup = db.executesql("select distinct(m2.id),m3.name,m5.name,m7.track_count,m2.date_year,m2.date_month,m2.date_day,m6.name,m2.barcode from release_group m1,release m2,release_name m3,medium m4,medium_format m5, country m6, tracklist m7 where m5.id = m4.format and m4.release = m2.id and m2.name = m3.id and m2.release_group = m1.id and m2.country = m6.id and m4.tracklist = m7.id and m1.id = "+id+";")'
+p144
+sI71
+S'\turls = db.executesql("select m2.url from l_release_group_url m1, url m2 where m1.entity1 = m2.id and m1.entity0 = "+id+";")'
+p145
+sI72
+S'\tmbid = db.executesql("select m1.gid from release_group m1 where m1.id = "+id+";")'
+p146
+sI73
+S'\trating = db.executesql("select rating, count from release_group_rating_local where id = "+id+";")'
+p147
+sI74
+S'\tavg_rating = float(rating[0][0])/float(rating[0][1])'
+p148
+sI75
+S'\tif auth.user():'
+p149
+sI76
+S'\t\turating = db.executesql("select rating from release_group_rating_local where id = "+id+" and user_id = "+auth.user.id+";")'
+p150
+sI77
+S'\t\tif urating:'
+p151
+ssg93
+S'()'
+p152
+sg95
+S'album'
+p153
+sa(dp154
+g72
+S'/home/www-data/web2py/gluon/dal.py'
+p155
+sg74
+(dp156
+S'query'
+p157
+S"'select rating, count from release_group_rating_local where id = 100229;'"
+p158
+sS'adapter'
+p159
+S'<gluon.dal.PostgreSQLAdapter object>'
+p160
+sS'adapter.execute'
+p161
+S'<bound method PostgreSQLAdapter.execute of <gluon.dal.PostgreSQLAdapter object>>'
+p162
+ssg80
+I7936
+sg81
+(dp163
+I7936
+S'            adapter.execute(query)'
+p164
+sI7937
+S'        if as_dict:'
+p165
+sI7938
+S"            if not hasattr(adapter.cursor,'description'):"
+p166
+sI7939
+S'                raise RuntimeError("database does not support executesql(...,as_dict=True)")'
+p167
+sI7940
+S'            # Non-DAL legacy db query, converts cursor results to dict.'
+p168
+sI7931
+S'        """'
+p169
+sI7932
+S'        adapter = self._adapter'
+p170
+sI7933
+S'        if placeholders:'
+p171
+sI7934
+S'            adapter.execute(query, placeholders)'
+p172
+sI7935
+S'        else:'
+p173
+ssg93
+S'(self=<DAL uri="postgres://musicbrainz:******@localhost/musicbrainz_db">, query=\'select rating, count from release_group_rating_local where id = 100229;\', placeholders=None, as_dict=False, fields=None, colnames=None)'
+p174
+sg95
+S'executesql'
+p175
+sa(dp176
+g72
+S'/home/www-data/web2py/gluon/dal.py'
+p177
+sg74
+(dp178
+S'a'
+S"('select rating, count from release_group_rating_local where id = 100229;',)"
+p179
+sS'self'
+p180
+S'<gluon.dal.PostgreSQLAdapter object>'
+p181
+sS'b'
+S'{}'
+p182
+sS'self.log_execute'
+p183
+S'<bound method PostgreSQLAdapter.log_execute of <gluon.dal.PostgreSQLAdapter object>>'
+p184
+ssg80
+I1768
+sg81
+(dp185
+I1763
+S'        self.db._timings.append((command,time.time()-t0))'
+p186
+sI1764
+S'        del self.db._timings[:-TIMINGSSIZE]'
+p187
+sI1765
+S'        return ret'
+p188
+sI1766
+S''
+sI1767
+S'    def execute(self, *a, **b):'
+p189
+sI1768
+S'        return self.log_execute(*a, **b)'
+p190
+sI1769
+S''
+sI1770
+S'    def represent(self, obj, fieldtype):'
+p191
+sI1771
+S'        field_is_type = fieldtype.startswith'
+p192
+sI1772
+S'        if isinstance(obj, CALLABLETYPES):'
+p193
+ssg93
+S"(self=<gluon.dal.PostgreSQLAdapter object>, *a=('select rating, count from release_group_rating_local where id = 100229;',), **b={})"
+p194
+sg95
+S'execute'
+p195
+sa(dp196
+g72
+S'/home/www-data/web2py/gluon/dal.py'
+p197
+sg74
+(dp198
+S'a'
+S"('select rating, count from release_group_rating_local where id = 100229;',)"
+p199
+sS'b'
+g182
+sS'self'
+p200
+S'<gluon.dal.PostgreSQLAdapter object>'
+p201
+sS'ret'
+p202
+g117
+sS'self.cursor'
+p203
+S'<cursor object at 0xab94689c; closed: 0>'
+p204
+sS'self.cursor.execute'
+p205
+S'<built-in method execute of psycopg2._psycopg.cursor object>'
+p206
+ssg80
+I1762
+sg81
+(dp207
+I1760
+S'        self.db._lastsql = command'
+p208
+sI1761
+S'        t0 = time.time()'
+p209
+sI1762
+S'        ret = self.cursor.execute(*a, **b)'
+p210
+sI1763
+S'        self.db._timings.append((command,time.time()-t0))'
+p211
+sI1764
+S'        del self.db._timings[:-TIMINGSSIZE]'
+p212
+sI1765
+S'        return ret'
+p213
+sI1766
+S''
+sI1757
+S'        command = a[0]'
+p214
+sI1758
+S'        if self.db._debug:'
+p215
+sI1759
+S"            LOGGER.debug('SQL: %s' % command)"
+p216
+ssg93
+S"(self=<gluon.dal.PostgreSQLAdapter object>, *a=('select rating, count from release_group_rating_local where id = 100229;',), **b={})"
+p217
+sg95
+S'log_execute'
+p218
+sasS'pyver'
+p219
+S'Python 2.7.3: /usr/bin/python (prefix: /usr)'
+p220
+sS'session'
+p221
+g67
+(S's\xf2\x07\x00\x00<div><table><tr><td style="font-weight:bold;vertical-align:top">auth</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">expiration</td><td valign="top">:</td><td><div>2592000</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">hmac_key</td><td valign="top">:</td><td><div>87ac0735-b354-4562-a009-7eb27b4642a4</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">last_visit</td><td valign="top">:</td><td><div>datetime.datetime(2013, 4, 25, 0, 48, 10, 450351)</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">remember</td><td valign="top">:</td><td><div>True</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">user</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">email</td><td valign="top">:</td><td><div>devashishrocker@gmail.com</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">first_name</td><td valign="top">:</td><td><div>Devashish</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">id</td><td valign="top">:</td><td><div>1</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">last_name</td><td valign="top">:</td><td><div>Sharma</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">registration_id</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">registration_key</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">reset_password_key</td><td valign="top">:</td><td><div></div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">user_groups</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">1</td><td valign="top">:</td><td><div>user_1</div></td></tr></table></div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">flash</td><td valign="top">:</td><td><div>None</div></td></tr></table></div>'
+tRp222
+sS'etype'
+p223
+S"<class 'psycopg2.ProgrammingError'>"
+p224
+sS'date'
+p225
+S'Thu Apr 25 10:42:24 2013'
+p226
+sS'response'
+p227
+g67
+(S's\xc6\x1a\x00\x00<div><table><tr><td style="font-weight:bold;vertical-align:top">body</td><td valign="top">:</td><td><div>&lt;cStringIO.StringO object at 0xab1a4d60&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">cookies</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">session_id_musicbrainz</td><td valign="top">:</td><td><div>127.0.0.1-cef46f10-7fe3-4161-8f04-f260945a4b1b<table><tr><td style="font-weight:bold;vertical-align:top">comment</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">domain</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">expires</td><td valign="top">:</td><td><div>2592000</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">httponly</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">max-age</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">path</td><td valign="top">:</td><td><div>/</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">secure</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">version</td><td valign="top">:</td><td><div></div></td></tr></table></div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">delimiters</td><td valign="top">:</td><td><div><table><tr><td><div>{{</div></td></tr><tr><td><div>}}</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">files</td><td valign="top">:</td><td><div><table></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">flash</td><td valign="top">:</td><td><div></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">generic_patterns</td><td valign="top">:</td><td><div><table><tr><td><div>*</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">google_analytics_id</td><td valign="top">:</td><td><div>None</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">headers</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">X-Powered-By</td><td valign="top">:</td><td><div>web2py</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">logo</td><td valign="top">:</td><td><div><a class="brand" href="/musicbrainz/default/index"><b>MusicBrainz</b>&trade;&nbsp;</a></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">menu</td><td valign="top">:</td><td><div><table><tr><td><div><table><tr><td><div>Search</div></td></tr><tr><td><div>False</div></td></tr><tr><td><div>/musicbrainz/default/index</div></td></tr></table></div></td></tr><tr><td><div><table><tr><td><div>Advanced Search</div></td></tr><tr><td><div>False</div></td></tr><tr><td><div>/musicbrainz/default/album</div></td></tr><tr><td><div><table><tr><td><div><table><tr><td><div>For Artists</div></td></tr><tr><td><div>False</div></td></tr><tr><td><div>/musicbrainz/default/artistsearch</div></td></tr></table></div></td></tr><tr><td><div><table><tr><td><div>For Albums</div></td></tr><tr><td><div>False</div></td></tr><tr><td><div>/musicbrainz/default/albumsearch</div></td></tr></table></div></td></tr><tr><td><div><table><tr><td><div>For Songs</div></td></tr><tr><td><div>False</div></td></tr><tr><td><div>/musicbrainz/default/songsearch</div></td></tr></table></div></td></tr></table></div></td></tr></table></div></td></tr><tr><td><div><table><tr><td><div>Playlists</div></td></tr><tr><td><div>False</div></td></tr><tr><td><div>/musicbrainz/default/playlist</div></td></tr></table></div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">meta</td><td valign="top">:</td><td><div><table><tr><td style="font-weight:bold;vertical-align:top">author</td><td valign="top">:</td><td><div>Devashish Tyagi &lt;devashishrocker@gmail.com&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">description</td><td valign="top">:</td><td><div>An Application to explore musicbrainz database</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">generator</td><td valign="top">:</td><td><div>Web2py Web Framework</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">keywords</td><td valign="top">:</td><td><div>web2py, python, framework</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">models_to_run</td><td valign="top">:</td><td><div><table><tr><td><div>^\\w+\\.py$</div></td></tr><tr><td><div>^default/\\w+\\.py$</div></td></tr><tr><td><div>^default/album/\\w+\\.py$</div></td></tr></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">postprocessing</td><td valign="top">:</td><td><div><table></table></div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_cookie_expires</td><td valign="top">:</td><td><div>None</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_data_name</td><td valign="top">:</td><td><div>session_data_musicbrainz</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_file</td><td valign="top">:</td><td><div>&lt;open file &#x27;/home/www-data/web2py/applications/musicbrainz/sessions/127.0.0.1-cef46f10-7fe3-4161-8f04-f260945a4b1b&#x27;, mode &#x27;rb+&#x27; at 0xab259a18&gt;</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_filename</td><td valign="top">:</td><td><div>/home/www-data/web2py/applications/musicbrainz/sessions/127.0.0.1-cef46f10-7fe3-4161-8f04-f260945a4b1b</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_id</td><td valign="top">:</td><td><div>127.0.0.1-cef46f10-7fe3-4161-8f04-f260945a4b1b</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_id_name</td><td valign="top">:</td><td><div>session_id_musicbrainz</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_locked</td><td valign="top">:</td><td><div>True</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_new</td><td valign="top">:</td><td><div>False</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">session_storage_type</td><td valign="top">:</td><td><div>file</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">status</td><td valign="top">:</td><td><div>200</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">subtitle</td><td valign="top">:</td><td><div>Discover Music</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">title</td><td valign="top">:</td><td><div>Musicbrainz</div></td></tr><tr><td style="font-weight:bold;vertical-align:top">view</td><td valign="top">:</td><td><div>default/album.html</div></td></tr></table></div>'
+tRp228
+sS'locals'
+p229
+(dp230
+S'a'
+S"('select rating, count from release_group_rating_local where id = 100229;',)"
+p231
+sS'self'
+p232
+S'<gluon.dal.PostgreSQLAdapter object>'
+p233
+sS'b'
+g182
+sS'command'
+p234
+S"'select rating, count from release_group_rating_local where id = 100229;'"
+p235
+sS't0'
+p236
+S'1366866744.390037'
+p237
+sssS'traceback'
+p238
+S'Traceback (most recent call last):\n  File "/home/www-data/web2py/gluon/restricted.py", line 212, in restricted\n    exec ccode in environment\n  File "/home/www-data/web2py/applications/musicbrainz/controllers/default.py", line 289, in <module>\n  File "/home/www-data/web2py/gluon/globals.py", line 194, in <lambda>\n    self._caller = lambda f: f()\n  File "/home/www-data/web2py/applications/musicbrainz/controllers/default.py", line 73, in album\n    rating = db.executesql("select rating, count from release_group_rating_local where id = "+id+";")\n  File "/home/www-data/web2py/gluon/dal.py", line 7936, in executesql\n    adapter.execute(query)\n  File "/home/www-data/web2py/gluon/dal.py", line 1768, in execute\n    return self.log_execute(*a, **b)\n  File "/home/www-data/web2py/gluon/dal.py", line 1762, in log_execute\n    ret = self.cursor.execute(*a, **b)\nProgrammingError: column "count" does not exist\nLINE 1: select rating, count from release_group_rating_local where i...\n                       ^\n\n'
+p239
+s.
